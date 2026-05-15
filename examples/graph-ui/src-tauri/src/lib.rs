@@ -25,6 +25,7 @@ pub struct ColoringResult {
     pub coloring: HashMap<u32, usize>,
     pub num_colors: usize,
     pub color_classes: Vec<Vec<u32>>,
+    pub order: Vec<u32>,
 }
 
 fn snapshot(g: &Graph) -> GraphSnapshot {
@@ -166,7 +167,7 @@ fn check_connectivity(state: State<AppState>) -> ConnectivityResult {
 
 #[tauri::command]
 fn run_coloring(state: tauri::State<AppState>) -> ColoringResult {
-    let coloring = state.graph.lock().unwrap().color();
+    let (coloring, order) = state.graph.lock().unwrap().color();
     let num_colors = coloring.values().max().map(|&m| m + 1).unwrap_or(0);
 
     let mut color_classes: Vec<Vec<u32>> = vec![vec![]; num_colors];
@@ -180,6 +181,7 @@ fn run_coloring(state: tauri::State<AppState>) -> ColoringResult {
         coloring,
         num_colors,
         color_classes,
+        order,
     }
 }
 

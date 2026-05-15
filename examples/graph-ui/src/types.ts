@@ -35,4 +35,5 @@ export interface ColoringResult {
 	coloring: Record<number, number>;
 	num_colors: number;
 	color_classes: number[][];
+	order: number[];
 }

@@ -43,12 +43,16 @@ export default function ColorLegend({ data, onClose }: ColorLegendProps) {
 				</span>
 			</div>
 
-
-			{/* Note about heuristic */}
+			{/* Order */}
 			<div style={{ padding: `calc(2px * ${s}) calc(8px * ${s}) calc(3px * ${s})`, borderBottom: "1px solid #eee" }}>
-				<span style={{ fontSize: `calc(9px * ${s})`, color: "#aaa", fontStyle: "italic" }}>
-					DSatur heuristic — upper bound only
-				</span>
+				{data.order.map((idx) => {
+					return (
+						<span style={{ fontSize: `calc(9px * ${s})`, color: "#aaa", fontStyle: "italic" }}>
+							{idx + " "}
+						</span>
+					);
+
+				})}
 			</div>
 
 			{/* Color class rows */}

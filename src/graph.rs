@@ -288,9 +288,9 @@ impl Graph {
     //> Notes:
     //>  In dispute cases, we select the most connected _or_ the first listed.
     //>  The colors are numered, always choose the minor possible.
-    pub fn color(&self) -> HashMap<u32, usize> {
+    pub fn color(&self) -> (HashMap<u32, usize>, Vec<u32>) {
         if self.vertices.is_empty() {
-            return HashMap::new();
+            return (HashMap::new(), Vec::new());
         }
 
         // doesnt matter if it is directed or not in that case?
@@ -307,6 +307,7 @@ impl Graph {
             .collect();
 
         let mut coloring: HashMap<u32, usize> = HashMap::new();
+        let mut order = Vec::new();
 
         // saturation[v] = set of distinct colors that v sees
         let mut saturation: HashMap<u32, HashSet<usize>> =
@@ -318,12 +319,13 @@ impl Graph {
         let first_idx = uncolored
             .iter()
             .enumerate()
-            .max_by_key(|(_, v)| degree[&v])
+            .max_by_key(|(_, v)| degree[v])
             .map(|(i, _)| i)
             .unwrap();
         let first = uncolored.remove(first_idx);
 
         coloring.insert(first, 0);
+        order.push(first);
         for &nb in ug.neighbors(first) {
             saturation.entry(nb).or_default().insert(0);
         }
@@ -348,6 +350,7 @@ impl Graph {
 
             let color = (0..).find(|c| !neighbor_colors.contains(c)).unwrap(); // minimum color possible
             coloring.insert(next, color);
+            order.push(next);
 
             for &nb in ug.neighbors(next) {
                 // i just care about uncolereds at that point
@@ -356,8 +359,7 @@ impl Graph {
                 }
             }
         }
-
-        coloring
+        (coloring, order)
     }
 }
 
