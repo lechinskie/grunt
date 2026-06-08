@@ -9,7 +9,9 @@ interface ToolbarProps {
 	vInput: string; setVInput: (v: string) => void;
 	eFrom: string; setEFrom: (v: string) => void;
 	eTo: string; setETo: (v: string) => void;
+	eWeight: string; setEWeight: (v: string) => void;
 	algoV: string; setAlgoV: (v: string) => void;
+	algoTarget: string; setAlgoTarget: (v: string) => void;
 	showTemplateMenu: boolean;
 	onToggleTemplateMenu: () => void;
 	onAddVertex: () => void; onRemoveVertex: () => void;
@@ -20,7 +22,11 @@ interface ToolbarProps {
 	onClosureDirect: () => void; onClosureIndirect: () => void;
 	onConnectivity: () => void; onClearResult: () => void;
 	onColor: () => void;
+	onDijkstra: () => void;
+	onDijkstraPath: () => void;
+	onAStar: () => void;
 	onLoadTemplate: (key: string) => void;
+	onLoadJson: (file: File) => void;
 	canUndo: boolean;
 	canRedo: boolean;
 	onUndo: () => void;
@@ -56,8 +62,9 @@ function TemplateDropdown({ anchorRef, onClose, onSelect }: { anchorRef: React.R
 	);
 }
 
-export default function Toolbar({ graph, flash, hasResult, vInput, setVInput, eFrom, setEFrom, eTo, setETo, algoV, setAlgoV, showTemplateMenu, onToggleTemplateMenu, onAddVertex, onRemoveVertex, onAddEdge, onRemoveEdge, onSetDirected, onReset, onBfs, onDfs, onClosureDirect, onClosureIndirect, onConnectivity, onClearResult, onColor, onLoadTemplate, canUndo, canRedo, onUndo, onRedo, onToggleHelp, selected, selectedEdge, uiZoom, setUiZoom }: ToolbarProps) {
+export default function Toolbar({ graph, flash, hasResult, vInput, setVInput, eFrom, setEFrom, eTo, setETo, eWeight, setEWeight, algoV, setAlgoV, algoTarget, setAlgoTarget, showTemplateMenu, onToggleTemplateMenu, onAddVertex, onRemoveVertex, onAddEdge, onRemoveEdge, onSetDirected, onReset, onBfs, onDfs, onClosureDirect, onClosureIndirect, onConnectivity, onClearResult, onColor, onDijkstra, onDijkstraPath, onAStar, onLoadTemplate, onLoadJson, canUndo, canRedo, onUndo, onRedo, onToggleHelp, selected, selectedEdge, uiZoom, setUiZoom }: ToolbarProps) {
 	const templateBtnRef = useRef<HTMLButtonElement>(null);
+	const jsonInputRef = useRef<HTMLInputElement>(null);
 	const selectionInfo = selected !== null ? `Node ${selected}` : selectedEdge !== null ? `Edge (${selectedEdge.src},${selectedEdge.dst})` : null;
 	const s = "var(--ui-scale, 1)";
 
@@ -75,11 +82,11 @@ export default function Toolbar({ graph, flash, hasResult, vInput, setVInput, eF
 			<Sep />
 			<div className="tb-group"><Lbl c="Vertex" /><Field value={vInput} onChange={setVInput} onEnter={onAddVertex} placeholder="id" /><Btn onClick={onAddVertex} cls="primary" title="Add vertex">+</Btn><Btn onClick={onRemoveVertex} cls="danger" title="Remove vertex">−</Btn></div>
 			<Sep />
-			<div className="tb-group"><Lbl c="Edge" /><Field value={eFrom} onChange={setEFrom} placeholder="src" /><span style={{ fontFamily: "monospace", fontSize: `calc(11px * ${s})`, color: "#555" }}>{graph.directed ? "→" : "—"}</span><Field value={eTo} onChange={setETo} placeholder="dst" /><Btn onClick={onAddEdge} cls="primary" title="Add edge">+</Btn><Btn onClick={onRemoveEdge} cls="danger" title="Remove edge">−</Btn></div>
+			<div className="tb-group"><Lbl c="Edge" /><Field value={eFrom} onChange={setEFrom} placeholder="src" /><span style={{ fontFamily: "monospace", fontSize: `calc(11px * ${s})`, color: "#555" }}>{graph.directed ? "→" : "—"}</span><Field value={eTo} onChange={setETo} placeholder="dst" /><Field value={eWeight} onChange={setEWeight} placeholder="w" /><Btn onClick={onAddEdge} cls="primary" title="Add edge">+</Btn><Btn onClick={onRemoveEdge} cls="danger" title="Remove edge">−</Btn></div>
 			<Sep />
-			<div className="tb-group"><Lbl c="Template" /><button ref={templateBtnRef} className="btn-raised" onClick={onToggleTemplateMenu}>Load ▾</button>{showTemplateMenu && <TemplateDropdown anchorRef={templateBtnRef} onClose={onToggleTemplateMenu} onSelect={onLoadTemplate} />}</div>
+			<div className="tb-group"><Lbl c="Template" /><button ref={templateBtnRef} className="btn-raised" onClick={onToggleTemplateMenu}>Load ▾</button>{showTemplateMenu && <TemplateDropdown anchorRef={templateBtnRef} onClose={onToggleTemplateMenu} onSelect={onLoadTemplate} />}<button className="btn-raised" onClick={() => jsonInputRef.current?.click()} title="Load JSON file">JSON</button><input ref={jsonInputRef} type="file" accept=".json,application/json" style={{ display: "none" }} onChange={e => { const f = e.target.files?.[0]; if (f) { onLoadJson(f); e.target.value = ""; } }} /></div>
 			<Sep />
-			<div className="tb-group"><Lbl c="Algorithm" /><Field value={algoV} onChange={setAlgoV} placeholder="root" /><Btn onClick={onBfs} title="Breadth-First Search">BFS</Btn><Btn onClick={onDfs} title="Depth-First Search">DFS</Btn><Btn onClick={onClosureDirect} title="Reachable from">TC+</Btn><Btn onClick={onClosureIndirect} title="Reaches">TC-</Btn><Btn onClick={onConnectivity} cls="primary" title="Connected components">Analyse</Btn><Btn onClick={onColor} cls="primary" title="DSatur graph coloring">Color</Btn>{hasResult && <Btn onClick={onClearResult} cls="danger">✕</Btn>}</div>
+			<div className="tb-group"><Lbl c="Algorithm" /><Field value={algoV} onChange={setAlgoV} placeholder="src" /><Field value={algoTarget} onChange={setAlgoTarget} placeholder="tgt" /><Btn onClick={onBfs} title="Breadth-First Search">BFS</Btn><Btn onClick={onDfs} title="Depth-First Search">DFS</Btn><Btn onClick={onClosureDirect} title="Reachable from">TC+</Btn><Btn onClick={onClosureIndirect} title="Reaches">TC-</Btn><Btn onClick={onDijkstra} cls="primary" title="Dijkstra shortest distances">Dij</Btn><Btn onClick={onDijkstraPath} cls="primary" title="Dijkstra shortest path">→Dij</Btn><Btn onClick={onAStar} cls="primary" title="A* search">A*</Btn><Btn onClick={onConnectivity} cls="primary" title="Connected components">Analyse</Btn><Btn onClick={onColor} cls="primary" title="DSatur graph coloring">Color</Btn>{hasResult && <Btn onClick={onClearResult} cls="danger">✕</Btn>}</div>
 
 			<span style={{ flex: 1 }} />
 

@@ -28,6 +28,20 @@ pub struct ColoringResult {
     pub order: Vec<u32>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct AlgoStep {
+    pub node: u32,
+    pub dist: f64,
+    pub f: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DetailedPathResult {
+    pub path: Vec<u32>,
+    pub cost: f64,
+    pub closed: Vec<AlgoStep>,
+}
+
 fn snapshot(g: &Graph) -> GraphSnapshot {
     let edges = if g.directed {
         g.edges.iter().map(|&(u, v)| [u, v]).collect()
@@ -101,9 +115,9 @@ fn remove_vertex(state: State<AppState>, v: u32) -> Result<GraphSnapshot, String
 }
 
 #[tauri::command]
-fn add_edge(state: State<AppState>, u: u32, v: u32) -> Result<GraphSnapshot, String> {
+fn add_edge(state: State<AppState>, u: u32, v: u32, weight: f64) -> Result<GraphSnapshot, String> {
     let mut g = state.graph.lock().unwrap();
-    if !g.add_edge(u, v) {
+    if !g.add_edge(u, v, weight) {
         return Err(err(format!(
             "Could not add edge ({u}, {v}) — vertices must exist and edge must not be a duplicate"
         )));
@@ -185,6 +199,87 @@ fn run_coloring(state: tauri::State<AppState>) -> ColoringResult {
     }
 }
 
+#[tauri::command]
+fn run_dijkstra(state: State<AppState>, source: u32) -> Result<HashMap<u32, f64>, String> {
+    let g = state.graph.lock().unwrap();
+    if !g.vertices.contains(&source) {
+        return Err(err(format!("Vertex {source} not found")));
+    }
+    Ok(g.dijkstra(source))
+}
+
+#[tauri::command]
+fn run_dijkstra_path(
+    state: State<AppState>,
+    source: u32,
+    target: u32,
+) -> Result<Option<DetailedPathResult>, String> {
+    let g = state.graph.lock().unwrap();
+    if !g.vertices.contains(&source) {
+        return Err(err(format!("Vertex {source} not found")));
+    }
+    if !g.vertices.contains(&target) {
+        return Err(err(format!("Vertex {target} not found")));
+    }
+    Ok(g.dijkstra_path(source, target).map(|(path, cost, closed)| DetailedPathResult {
+        path,
+        cost,
+        closed: closed.into_iter().map(|(node, dist)| AlgoStep { node, dist, f: None }).collect(),
+    }))
+}
+
+#[tauri::command]
+fn run_a_star(
+    state: State<AppState>,
+    source: u32,
+    target: u32,
+    heuristic: HashMap<u32, f64>,
+) -> Result<Option<DetailedPathResult>, String> {
+    let g = state.graph.lock().unwrap();
+    if !g.vertices.contains(&source) {
+        return Err(err(format!("Vertex {source} not found")));
+    }
+    if !g.vertices.contains(&target) {
+        return Err(err(format!("Vertex {target} not found")));
+    }
+    Ok(g.a_star(source, target, |v| *heuristic.get(&v).unwrap_or(&0.0)).map(
+        |(path, cost, closed)| DetailedPathResult {
+            path,
+            cost,
+            closed: closed
+                .into_iter()
+                .map(|(node, dist, f)| AlgoStep {
+                    node,
+                    dist,
+                    f: Some(f),
+                })
+                .collect(),
+        },
+    ))
+}
+
+#[tauri::command]
+fn set_weight(state: State<AppState>, u: u32, v: u32, weight: f64) -> Result<(), String> {
+    let mut g = state.graph.lock().unwrap();
+    if !g.vertices.contains(&u) || !g.vertices.contains(&v) {
+        return Err(err(format!("Vertex not found")));
+    }
+    g.set_weight(u, v, weight);
+    Ok(())
+}
+
+#[tauri::command]
+fn get_weights(state: State<AppState>) -> HashMap<String, f64> {
+    state
+        .graph
+        .lock()
+        .unwrap()
+        .weights
+        .iter()
+        .map(|(&(u, v), &w)| (format!("{u},{v}"), w))
+        .collect()
+}
+
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState {
@@ -204,6 +299,11 @@ pub fn run() {
             get_transitive_indirect,
             check_connectivity,
             run_coloring,
+            run_dijkstra,
+            run_dijkstra_path,
+            run_a_star,
+            set_weight,
+            get_weights,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

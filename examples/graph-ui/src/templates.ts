@@ -7,6 +7,7 @@ export interface TemplateData {
   edges: [number, number][];
   directed: boolean;
   positions: Pos[];
+  weights?: Record<string, number>;
 }
 
 export const TEMPLATES: Record<string, TemplateData> = {

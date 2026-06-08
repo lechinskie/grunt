@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import type { RefObject } from "react";
 import type { GraphSnapshot, Pos, EdgeSelection } from "../types";
 import { NODE_R, ARROW, SCC_PALETTE } from "../constants";
@@ -7,17 +7,20 @@ interface CanvasProps {
   graph: GraphSnapshot;
   positions: Map<number, Pos>;
   highlighted: Set<number>;
+  highlightedEdges: Set<string>;
   sccMap: Map<number, number>;
   selected: number | null;
   selectedEdge: EdgeSelection | null;
   edgeSrc: number | null;
   pan: { x: number; y: number };
   scale: number;
+  weights: Map<string, number>;
   svgRef: RefObject<SVGSVGElement>;
   onNodeClick: (e: React.MouseEvent, v: number) => void;
   onEdgeClick: (src: number, dst: number) => void;
   onCanvasRightClick: (e: React.MouseEvent) => void;
   onCanvasLeftDown: (e: React.MouseEvent<SVGSVGElement>) => void;
+  onWeightEdit: (u: number, v: number, weight: number) => void;
 }
 
 function getNodeColor(v: number, sccMap: Map<number, number>, highlighted: Set<number>): string {
@@ -46,23 +49,58 @@ function isEdgeSelected(u: number, v: number, selectedEdge: EdgeSelection | null
   return selectedEdge !== null && selectedEdge.src === u && selectedEdge.dst === v;
 }
 
-export default function Canvas({ graph, positions, highlighted, sccMap, selected, selectedEdge, edgeSrc, pan, scale, svgRef, onNodeClick, onEdgeClick, onCanvasRightClick, onCanvasLeftDown }: CanvasProps) {
+export default function Canvas({ graph, positions, highlighted, highlightedEdges, sccMap, selected, selectedEdge, edgeSrc, pan, scale, weights, svgRef, onNodeClick, onEdgeClick, onCanvasRightClick, onCanvasLeftDown, onWeightEdit }: CanvasProps) {
+  const [editing, setEditing] = useState<{ u: number; v: number; x: number; y: number; val: string } | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const openedRef = useRef(false);
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus();
+      if (!openedRef.current) {
+        inputRef.current.select();
+        openedRef.current = true;
+      }
+    } else {
+      openedRef.current = false;
+    }
+  }, [editing]);
 
   const handleEdgeClick = useCallback((u: number, v: number, e: React.MouseEvent) => {
     e.stopPropagation();
     onEdgeClick(u, v);
   }, [onEdgeClick]);
 
+  const handleDoubleClickWeight = (u: number, v: number, mx: number, my: number, currentWeight: number) => {
+    setEditing({ u, v, x: mx, y: my, val: String(currentWeight) });
+  };
 
+  const commitWeight = () => {
+    if (!editing) return;
+    const w = parseFloat(editing.val);
+    if (!isNaN(w)) {
+      onWeightEdit(editing.u, editing.v, w);
+    }
+    setEditing(null);
+  };
+
+  const handleWeightKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      commitWeight();
+    } else if (e.key === "Escape") {
+      setEditing(null);
+    }
+  };
 
 const renderEdge = (u: number, v: number, key: string) => {
     const p1 = positions.get(u), p2 = positions.get(v);
     if (!p1 || !p2) return null;
     const directed = graph.directed;
     const isLit = highlighted.has(u) && highlighted.has(v);
+    const isPathEdge = highlightedEdges.has(`${u},${v}`);
     const isSelected = isEdgeSelected(u, v, selectedEdge);
-    const stroke = isSelected ? "#e11d48" : isLit ? "#1a3a6b" : "#888";
-    const sw = isSelected ? 2.5 : isLit ? 1.8 : 1.2;
+    const stroke = isSelected ? "#e11d48" : isPathEdge ? "#059669" : isLit ? "#1a3a6b" : "#888";
+    const sw = isSelected ? 2.5 : isPathEdge ? 2.5 : isLit ? 1.8 : 1.2;
 
     const hitBoxWidth = 15;
 
@@ -70,9 +108,7 @@ const renderEdge = (u: number, v: number, key: string) => {
       const pathData = `M ${p1.x - NODE_R},${p1.y} C ${p1.x - 55},${p1.y - 55} ${p1.x + 55},${p1.y - 55} ${p1.x + NODE_R},${p1.y}`;
       return (
         <g key={key} style={{ cursor: "pointer" }} onClick={(e) => handleEdgeClick(u, v, e)}>
-          {/* Hitbox Path */}
           <path d={pathData} fill="none" stroke="transparent" strokeWidth={hitBoxWidth} />
-          {/* Visual Path */}
           <path d={pathData} fill="none" stroke={stroke} strokeWidth={sw} markerEnd={directed ? "url(#arrow)" : undefined} />
         </g>
       );
@@ -92,12 +128,23 @@ const renderEdge = (u: number, v: number, key: string) => {
     const x2 = p2.x - nx * (NODE_R + (directed ? ARROW : 0)) + ox;
     const y2 = p2.y - ny * (NODE_R + (directed ? ARROW : 0)) + oy;
 
+    const mx = (x1 + x2) / 2;
+    const my = (y1 + y2) / 2;
+
+    const weight = weights.get(`${u},${v}`);
+
     return (
       <g key={key} style={{ cursor: "pointer" }} onClick={(e) => handleEdgeClick(u, v, e)}>
-        {/* Hitbox Line */}
         <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="transparent" strokeWidth={hitBoxWidth} />
-        {/* Visual Line */}
         <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={stroke} strokeWidth={sw} markerEnd={directed ? "url(#arrow)" : undefined} />
+        {weight !== undefined && editing?.u === u && editing?.v === v ? null : (
+          <text x={mx} y={my - 8} textAnchor="middle" dominantBaseline="central" fontSize={9}
+            fontFamily="monospace" fill="#555" stroke="white" strokeWidth={2.5}
+            paintOrder="stroke" style={{ cursor: "pointer", userSelect: "none" }}
+            onDoubleClick={(e) => { e.stopPropagation(); handleDoubleClickWeight(u, v, mx, my, weight ?? 1.0); }}>
+            {weight !== undefined ? weight.toFixed(1) : "1.0"}
+          </text>
+        )}
       </g>
     );
   };
@@ -125,6 +172,20 @@ const renderEdge = (u: number, v: number, key: string) => {
 
       <g transform={`translate(${pan.x},${pan.y}) scale(${scale})`}>
         {graph.edges.map(([u, v]) => renderEdge(u, v, `e-${u}-${v}`))}
+        {editing && (
+          <foreignObject x={editing.x - 30} y={editing.y - 10} width={60} height={22}>
+            <input
+              ref={inputRef}
+              type="number"
+              step="any"
+              value={editing.val}
+              onChange={(e) => setEditing({ ...editing, val: e.target.value })}
+              onKeyDown={handleWeightKeyDown}
+              onBlur={commitWeight}
+              style={{ width: "100%", height: "100%", padding: 0, border: "1px solid #2563eb", textAlign: "center", fontSize: 11, fontFamily: "monospace", background: "#fff" }}
+            />
+          </foreignObject>
+        )}
 
         {graph.vertices.map(v => {
           const pos = positions.get(v);
@@ -133,15 +194,15 @@ const renderEdge = (u: number, v: number, key: string) => {
           const stroke = getNodeStroke(v, sccMap, highlighted, selected, edgeSrc);
           const color = getNodeTextColor(v, sccMap, highlighted, selected, edgeSrc);
           const isEdgeSrc = edgeSrc === v;
-          const isSelected = selected === v;
-          const sw = (isEdgeSrc || isSelected) ? 2 : 1.5;
+          const isSelectedNode = selected === v;
+          const sw = (isEdgeSrc || isSelectedNode) ? 2 : 1.5;
 
           return (
             <g key={v} transform={`translate(${pos.x},${pos.y})`} style={{ cursor: "pointer" }} onMouseDown={(e) => onNodeClick(e, v)}>
               {isEdgeSrc && <circle r={NODE_R + 6} fill="none" stroke="#b45309" strokeWidth={1} strokeDasharray="4 3" strokeOpacity={0.7} />}
-              {isSelected && !isEdgeSrc && <circle r={NODE_R + 4} fill="none" stroke="#1a3a6b" strokeWidth={0.8} strokeOpacity={0.4} />}
+              {isSelectedNode && !isEdgeSrc && <circle r={NODE_R + 4} fill="none" stroke="#1a3a6b" strokeWidth={0.8} strokeOpacity={0.4} />}
               <circle r={NODE_R} fill={fill} stroke={stroke} strokeWidth={sw} />
-              <text textAnchor="middle" dominantBaseline="central" fontSize={11} fontFamily="'Courier Prime', monospace" fontWeight={isSelected || isEdgeSrc ? 700 : 400} fill={color} style={{ pointerEvents: "none", userSelect: "none" }}>{v}</text>
+              <text textAnchor="middle" dominantBaseline="central" fontSize={11} fontFamily="'Courier Prime', monospace" fontWeight={isSelectedNode || isEdgeSrc ? 700 : 400} fill={color} style={{ pointerEvents: "none", userSelect: "none" }}>{v}</text>
             </g>
           );
         })}

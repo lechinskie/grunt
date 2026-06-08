@@ -9,11 +9,24 @@ export interface ConnectivityResult {
 	components: number[][];
 }
 
+export interface AlgoStep {
+	node: number;
+	dist: number;
+	f: number | null;
+}
+
+export interface DetailedPathResult {
+	path: number[];
+	cost: number;
+	closed: AlgoStep[];
+}
+
 export type AlgoResult =
 	| { kind: "traversal"; label: string; order: number[] }
 	| { kind: "closure"; label: string; vertices: number[] }
 	| { kind: "connectivity"; data: ConnectivityResult }
 	| { kind: "coloring"; data: ColoringResult }
+	| { kind: "path"; label: string; path: number[]; cost: number; closed: AlgoStep[] }
 	| null;
 
 export interface Pos { x: number; y: number; }
@@ -29,6 +42,7 @@ export interface GraphHistory {
 	vertices: number[];
 	edges: [number, number][];
 	directed: boolean;
+	weights?: Record<string, number>;
 }
 
 export interface ColoringResult {

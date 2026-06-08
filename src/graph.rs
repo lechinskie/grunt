@@ -1,5 +1,27 @@
 use nalgebra::DMatrix;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
+
+struct HeapNode(f64, u32);
+type DjikstraResultPath = Option<(Vec<u32>, f64, Vec<(u32, f64)>)>;
+type AStarResultPath = Option<(Vec<u32>, f64, Vec<(u32, f64, f64)>)>;
+
+impl Ord for HeapNode {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other.0.total_cmp(&self.0)
+    }
+}
+impl PartialOrd for HeapNode {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl PartialEq for HeapNode {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+impl Eq for HeapNode {}
 
 #[derive(Debug, Clone)]
 pub struct Graph {
@@ -7,6 +29,7 @@ pub struct Graph {
     pub edges: Vec<(u32, u32)>,
     pub adjacency: HashMap<u32, Vec<u32>>,
     pub directed: bool,
+    pub weights: HashMap<(u32, u32), f64>,
 }
 
 impl Graph {
@@ -16,6 +39,7 @@ impl Graph {
             edges: Vec::new(),
             adjacency: HashMap::new(),
             directed: true,
+            weights: HashMap::new(),
         }
     }
 
@@ -26,7 +50,12 @@ impl Graph {
         }
     }
 
-    pub fn from_edges(directed: bool, vertices: Vec<u32>, edges: Vec<(u32, u32)>) -> Self {
+    pub fn from_edges(
+        directed: bool,
+        vertices: Vec<u32>,
+        edges: Vec<(u32, u32)>,
+        weights: HashMap<(u32, u32), f64>,
+    ) -> Self {
         let mut adjacency: HashMap<u32, Vec<u32>> =
             vertices.iter().map(|&v| (v, Vec::new())).collect();
 
@@ -39,6 +68,7 @@ impl Graph {
             edges: edges.clone(),
             adjacency,
             directed,
+            weights,
         }
     }
 
@@ -64,7 +94,7 @@ impl Graph {
         true
     }
 
-    pub fn add_edge(&mut self, u: u32, v: u32) -> bool {
+    pub fn add_edge(&mut self, u: u32, v: u32, weight: f64) -> bool {
         if !self.vertices.contains(&u) || !self.vertices.contains(&v) {
             return false;
         }
@@ -78,6 +108,7 @@ impl Graph {
             self.edges.push((v, u));
             self.adjacency.entry(v).or_default().push(u);
         }
+        self.weights.entry((u, v)).or_insert(weight);
 
         true
     }
@@ -93,8 +124,21 @@ impl Graph {
             self.edges.retain(|&e| e != (v, u));
             self.adjacency.entry(v).or_default().retain(|&x| x != u);
         }
+        let Some(_) = self.weights.remove(&(u, v)) else {
+            return false;
+        };
 
         true
+    }
+
+    pub fn get_weight(&self, u: u32, v: u32) -> Option<&f64> {
+        self.weights
+            .get(&(u, v))
+            .or_else(|| self.weights.get(&(v, u)))
+    }
+
+    pub fn set_weight(&mut self, u: u32, v: u32, weight: f64) -> Option<f64> {
+        self.weights.insert((u, v), weight)
     }
 
     pub fn undirected(&self) -> Graph {
@@ -107,12 +151,18 @@ impl Graph {
 
         let mut ng = self.clone();
         for (u, v) in edges_to_add {
-            ng.add_edge(u, v);
+            ng.add_edge(
+                u,
+                v,
+                *self
+                    .get_weight(u, v)
+                    .expect("should exists the weight for every point"),
+            );
         }
         ng
     }
 
-    pub fn adjacency_matrix(&self) -> DMatrix<u32> {
+    pub fn adjacency_matrix(&self) -> DMatrix<f64> {
         let n = self.vertices.len();
         let mut m = DMatrix::zeros(n, n);
 
@@ -121,7 +171,9 @@ impl Graph {
             let j = self.vertices.iter().position(|&x| x == v);
 
             if let (Some(row), Some(col)) = (i, j) {
-                m[(row, col)] = 1;
+                m[(row, col)] = *self
+                    .get_weight(u, v)
+                    .expect("should exists the weight for every point");
             }
         }
         m
@@ -179,7 +231,7 @@ impl Graph {
         self.vertices
             .iter()
             .enumerate()
-            .filter(|&(j, _)| tc[(row, j)] > 0)
+            .filter(|&(j, _)| tc[(row, j)] > 0.0)
             .map(|(_, &u)| u)
             .collect()
     }
@@ -194,7 +246,7 @@ impl Graph {
         self.vertices
             .iter()
             .enumerate()
-            .filter(|&(i, _)| tc[(i, col)] > 0)
+            .filter(|&(i, _)| tc[(i, col)] > 0.0)
             .map(|(_, &u)| u)
             .collect()
     }
@@ -209,14 +261,14 @@ impl Graph {
     //The boolean matrix multiplication C = A . B is defined as
     //C[i, j] = OR _from k 1 to n_ (A[i, k] and B[k, j])
     //but since we're trying to power here to define rechables A and B are the adjacency_matrix
-    fn mmb(&self) -> DMatrix<u32> {
+    fn mmb(&self) -> DMatrix<f64> {
         let n = self.vertices.len();
         let mut tc = self.adjacency_matrix();
         for k in 0..n {
             for i in 0..n {
                 for j in 0..n {
-                    if tc[(i, k)] > 0 && tc[(k, j)] > 0 {
-                        tc[(i, j)] = 1;
+                    if tc[(i, k)] > 0.0 && tc[(k, j)] > 0.0 {
+                        tc[(i, j)] = 1.0;
                     }
                 }
             }
@@ -274,6 +326,133 @@ impl Graph {
             sccs.push(scc);
         }
         sccs
+    }
+
+    pub fn dijkstra(&self, source: u32) -> HashMap<u32, f64> {
+        let mut dist: HashMap<u32, f64> = HashMap::new();
+        let mut heap = BinaryHeap::new();
+
+        dist.insert(source, 0.0);
+        heap.push(HeapNode(0.0, source));
+
+        while let Some(HeapNode(d, u)) = heap.pop() {
+            if let Some(&best) = dist.get(&u)
+                && d > best
+            {
+                continue;
+            }
+            for &v in self.neighbors(u) {
+                let w = self.get_weight(u, v).copied().unwrap_or(1.0);
+                let nd = d + w;
+                let is_shorter = dist.get(&v).map(|&x| nd < x).unwrap_or(true);
+                if is_shorter {
+                    dist.insert(v, nd);
+                    heap.push(HeapNode(nd, v));
+                }
+            }
+        }
+
+        dist
+    }
+
+    pub fn dijkstra_path(&self, source: u32, target: u32) -> DjikstraResultPath {
+        let mut dist: HashMap<u32, f64> = HashMap::new();
+        let mut prev: HashMap<u32, u32> = HashMap::new();
+        let mut heap = BinaryHeap::new();
+        let mut closed: Vec<(u32, f64)> = Vec::new();
+
+        dist.insert(source, 0.0);
+        heap.push(HeapNode(0.0, source));
+
+        while let Some(HeapNode(d, u)) = heap.pop() {
+            if let Some(&best) = dist.get(&u)
+                && d > best
+            {
+                continue;
+            }
+            closed.push((u, d));
+
+            if u == target {
+                let mut path = Vec::new();
+                let mut cur = target;
+                loop {
+                    path.push(cur);
+                    if cur == source {
+                        break;
+                    }
+                    cur = *prev.get(&cur)?;
+                }
+                path.reverse();
+                return Some((path, d, closed));
+            }
+
+            for &v in self.neighbors(u) {
+                let w = self.get_weight(u, v).copied().unwrap_or(1.0);
+                let nd = d + w;
+                let is_shorter = dist.get(&v).map(|&x| nd < x).unwrap_or(true);
+                if is_shorter {
+                    dist.insert(v, nd);
+                    prev.insert(v, u);
+                    heap.push(HeapNode(nd, v));
+                }
+            }
+        }
+
+        None
+    }
+
+    pub fn a_star<H: Fn(u32) -> f64>(
+        &self,
+        source: u32,
+        target: u32,
+        heuristic: H,
+    ) -> AStarResultPath {
+        let mut g_score: HashMap<u32, f64> = HashMap::new();
+        let mut prev: HashMap<u32, u32> = HashMap::new();
+        let mut heap = BinaryHeap::new(); // heap almost does all the work here since it takes the
+        // minumum  f_score to process and act like a priority stack
+
+        let mut closed: Vec<(u32, f64, f64)> = Vec::new();
+
+        g_score.insert(source, 0.0);
+        let h0 = heuristic(source);
+        heap.push(HeapNode(h0, source));
+
+        while let Some(HeapNode(f_u, u)) = heap.pop() {
+            let gu = g_score[&u];
+            if f_u > gu + heuristic(u) + 1e-9 {
+                continue;
+            }
+            closed.push((u, gu, f_u));
+
+            if u == target {
+                let mut path = Vec::new();
+                let mut cur = target;
+                loop {
+                    path.push(cur);
+                    if cur == source {
+                        break;
+                    }
+                    cur = *prev.get(&cur)?;
+                }
+                path.reverse();
+                return Some((path, gu, closed));
+            }
+
+            for &v in self.neighbors(u) {
+                let w = self.get_weight(u, v).copied().unwrap_or(1.0);
+                let tentative_g = gu + w;
+                let is_better = g_score.get(&v).map(|&x| tentative_g < x).unwrap_or(true);
+                if is_better {
+                    g_score.insert(v, tentative_g);
+                    prev.insert(v, u);
+                    let f = tentative_g + heuristic(v);
+                    heap.push(HeapNode(f, v));
+                }
+            }
+        }
+
+        None
     }
 
     // Heuristic:

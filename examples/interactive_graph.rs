@@ -99,7 +99,7 @@ fn main() {
                     let p: Vec<&str> = tok.split('-').collect();
                     if p.len() == 2 {
                         if let (Ok(u), Ok(v)) = (p[0].parse::<u32>(), p[1].parse::<u32>()) {
-                            if !g.add_edge(u, v) {
+                            if !g.add_edge(u, v, 1.0) {
                                 println!("{}-{} ignorado (dup. ou vertice inexistente)", u, v);
                             }
                         } else {

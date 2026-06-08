@@ -1,15 +1,17 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
-import type { GraphSnapshot, ConnectivityResult, ColoringResult, AlgoResult, Pos, Flash, EdgeSelection, GraphHistory } from "./types";
+import type { GraphSnapshot, ConnectivityResult, ColoringResult, AlgoResult, Pos, Flash, EdgeSelection, GraphHistory, DetailedPathResult } from "./types";
 import { CX, CY, circlePos } from "./constants";
 import { TEMPLATES } from "./templates";
 import Toolbar from "./components/Toolbar";
 import Canvas from "./components/Canvas";
 import OrderBanner from "./components/OrderBanner";
+import PathPanel from "./components/PathPanel";
 import SccLegend from "./components/SccLegend";
 import ColorLegend from "./components/ColorLegend";
 import LegendPanel from "./components/LegendPanel";
+import HeuristicEditor from "./components/HeuristicEditor";
 
 const MAX_HISTORY = 50;
 
@@ -29,6 +31,7 @@ export default function App() {
 	const [graph, setGraph] = useState<GraphSnapshot>({ vertices: [], edges: [], directed: true });
 	const [positions, setPositions] = useState<Map<number, Pos>>(new Map());
 	const [highlighted, setHighlighted] = useState<Set<number>>(new Set());
+	const [highlightedEdges, setHighlightedEdges] = useState<Set<string>>(new Set());
 	const [sccMap, setSccMap] = useState<Map<number, number>>(new Map());
 	const [selectedNode, setSelectedNode] = useState<number | null>(null);
 	const [selectedEdge, setSelectedEdge] = useState<EdgeSelection | null>(null);
@@ -36,13 +39,17 @@ export default function App() {
 	const [result, setResult] = useState<AlgoResult>(null);
 	const [flash, setFlash] = useState<Flash | null>(null);
 	const [showHelp, setShowHelp] = useState(false);
+	const [weights, setWeights] = useState<Map<string, number>>(new Map());
 
 	const [uiZoom, setUiZoom] = useState(1);
 	const [vInput, setVInput] = useState("");
 	const [eFrom, setEFrom] = useState("");
 	const [eTo, setETo] = useState("");
+	const [eWeight, setEWeight] = useState("");
 	const [algoV, setAlgoV] = useState("");
+	const [algoTarget, setAlgoTarget] = useState("");
 	const [showTemplateMenu, setShowTemplateMenu] = useState(false);
+	const [showHeuristicEditor, setShowHeuristicEditor] = useState(false);
 
 	const [pan, setPan] = useState({ x: 0, y: 0 });
 	const panRef = useRef(pan);
@@ -74,11 +81,19 @@ export default function App() {
 		catch (e) { showFlash("err", String(e)); return null; }
 	};
 
+	const fetchWeights = async () => {
+		const w = await call<Record<string, number>>("get_weights");
+		if (w) setWeights(new Map(Object.entries(w)));
+	};
+
+	const wMap = () => Object.fromEntries(weights);
+
 	const saveToHistory = useCallback((g: GraphSnapshot) => {
 		const snapshot: GraphHistory = {
 			vertices: [...g.vertices],
 			edges: [...g.edges],
 			directed: g.directed,
+			weights: wMap(),
 		};
 
 		if (historyIndex.current < history.current.length - 1) {
@@ -95,13 +110,19 @@ export default function App() {
 
 		setCanUndo(historyIndex.current > 0);
 		setCanRedo(false);
-	}, []);
+	}, [weights]);
 
-	const syncBackend = async (g: GraphSnapshot) => {
+	const syncBackend = async (g: GraphSnapshot, restoreWeights?: Record<string, number>) => {
 		await invoke("reset_graph");
 		await invoke("set_directed", { directed: g.directed });
 		for (const v of g.vertices) await invoke("add_vertex", { v });
-		for (const [u, v] of g.edges) await invoke("add_edge", { u, v });
+		for (const [u, v] of g.edges) await invoke("add_edge", { u, v, weight: 1.0 });
+		if (restoreWeights) {
+			for (const [key, w] of Object.entries(restoreWeights)) {
+				const [u, v] = key.split(",").map(Number);
+				await invoke("set_weight", { u, v, weight: w });
+			}
+		}
 	};
 
 	const restoreFromHistory = useCallback(async (index: number) => {
@@ -112,7 +133,7 @@ export default function App() {
 			directed: snap.directed,
 		};
 
-		await syncBackend(newGraph);
+		await syncBackend(newGraph, snap.weights);
 		setGraph(newGraph);
 		setPositions(prev => {
 			const next = new Map(prev);
@@ -144,7 +165,7 @@ export default function App() {
 		}
 	}, [restoreFromHistory, showFlash]);
 
-	const clearResult = () => { setResult(null); setHighlighted(new Set()); setSccMap(new Map()); };
+	const clearResult = () => { setResult(null); setHighlighted(new Set()); setSccMap(new Map()); setHighlightedEdges(new Set()); };
 
 	const applyGraph = useCallback((g: GraphSnapshot) => {
 		setGraph(g);
@@ -174,6 +195,10 @@ export default function App() {
 	useEffect(() => {
 		invoke<GraphSnapshot>("get_state").then(applyGraph);
 	}, [applyGraph]);
+
+	useEffect(() => {
+		fetchWeights();
+	}, [graph]);
 
 	useEffect(() => {
 		const onKeyDown = (e: KeyboardEvent) => {
@@ -270,12 +295,55 @@ export default function App() {
 		const data = await call<ColoringResult>("run_coloring");
 		if (!data) return;
 		setResult({ kind: "coloring", data });
-		// Reuse sccMap: vertex → color index so Canvas renders palette colors automatically
 		const map = new Map<number, number>();
 		data.color_classes.forEach((cls, idx) => cls.forEach(v => map.set(v, idx)));
 		setSccMap(map);
 		setHighlighted(new Set());
 		showFlash("ok", `coloring — χ ≤ ${data.num_colors}`);
+	};
+
+	const handleDijkstra = async () => {
+		const s = parseInt(algoV);
+		if (isNaN(s)) { showFlash("err", "specify source vertex"); return; }
+		const data = await call<Record<number, number>>("run_dijkstra", { source: s });
+		if (!data) return;
+		const entries = Object.entries(data).map(([v, d]) => `${v}:${d.toFixed(1)}`);
+		setHighlighted(new Set(Object.keys(data).map(Number)));
+		setHighlightedEdges(new Set());
+		setResult(null);
+		showFlash("ok", `Dijkstra from ${s} — ${entries.join(", ")}`);
+	};
+
+	const handleDijkstraPath = async () => {
+		const s = parseInt(algoV), t = parseInt(algoTarget);
+		if (isNaN(s) || isNaN(t)) { showFlash("err", "specify source & target"); return; }
+		const data = await call<DetailedPathResult | null>("run_dijkstra_path", { source: s, target: t });
+		if (!data) { showFlash("err", "no path found"); return; }
+		const { path, cost, closed } = data;
+		setResult({ kind: "path", label: `Dijkstra ${s}→${t}`, path, cost, closed });
+		setHighlighted(new Set(path));
+		const edges = new Set<string>();
+		for (let i = 0; i < path.length - 1; i++) edges.add(`${path[i]},${path[i + 1]}`);
+		setHighlightedEdges(edges);
+	};
+
+	const handleAStar = () => {
+		const s = parseInt(algoV), t = parseInt(algoTarget);
+		if (isNaN(s) || isNaN(t)) { showFlash("err", "specify source & target"); return; }
+		setShowHeuristicEditor(true);
+	};
+
+	const handleRunAStar = async (heuristic: Record<number, number>) => {
+		setShowHeuristicEditor(false);
+		const s = parseInt(algoV), t = parseInt(algoTarget);
+		const data = await call<DetailedPathResult | null>("run_a_star", { source: s, target: t, heuristic });
+		if (!data) { showFlash("err", "no path found"); return; }
+		const { path, cost, closed } = data;
+		setResult({ kind: "path", label: `A* ${s}→${t}`, path, cost, closed });
+		setHighlighted(new Set(path));
+		const edges = new Set<string>();
+		for (let i = 0; i < path.length - 1; i++) edges.add(`${path[i]},${path[i + 1]}`);
+		setHighlightedEdges(edges);
 	};
 
 	const handleAddVertex = async () => {
@@ -295,7 +363,8 @@ export default function App() {
 	const handleAddEdge = async () => {
 		const u = parseInt(eFrom), v = parseInt(eTo);
 		if (isNaN(u) || isNaN(v)) { showFlash("err", "invalid endpoint(s)"); return; }
-		await withGraph("add_edge", { u, v });
+		const weight = parseFloat(eWeight) || 1.0;
+		await withGraph("add_edge", { u, v, weight });
 	};
 
 	const handleRemoveEdge = async () => {
@@ -331,7 +400,10 @@ export default function App() {
 			await invoke("set_directed", { directed: t.directed });
 			await invoke("reset_graph");
 			for (const v of t.vertices) await invoke("add_vertex", { v });
-			for (const [u, v] of t.edges) await invoke("add_edge", { u, v });
+			for (const [u, v] of t.edges) {
+				const weight = t.weights?.[`${u},${v}`] ?? 1.0;
+				await invoke("add_edge", { u, v, weight });
+			}
 			const snap = await invoke<GraphSnapshot>("get_state");
 
 			history.current = [];
@@ -345,6 +417,60 @@ export default function App() {
 			clearResult(); setSelectedNode(null); setEdgeSrc(null); setPan({ x: 0, y: 0 });
 			showFlash("ok", `loaded ${t.label}`);
 		} catch (e) { showFlash("err", String(e)); }
+	};
+
+	const handleLoadJson = (file: File) => {
+		const reader = new FileReader();
+		reader.onload = async (ev) => {
+			try {
+				const data = JSON.parse(ev.target?.result as string);
+				if (!data.nodes || !data.edges) {
+					showFlash("err", "invalid JSON: missing nodes or edges");
+					return;
+				}
+				const nameToId: Record<string, number> = {};
+				for (const entry of data.nodes) {
+					const name = Object.keys(entry)[0];
+					nameToId[name] = entry[name];
+				}
+				const ids = Object.values(nameToId).sort((a, b) => a - b) as number[];
+				const edgeSet = new Set<string>();
+				const weights: Record<string, number> = {};
+				for (const [key, dist] of Object.entries(data.edges)) {
+					const [srcName, dstName] = key.split(":");
+					if (!srcName || !dstName) continue;
+					const u = nameToId[srcName];
+					const v = nameToId[dstName];
+					if (u === undefined || v === undefined || u === v) continue;
+					const normKey = u < v ? `${u},${v}` : `${v},${u}`;
+					edgeSet.add(normKey);
+					if (!weights[normKey]) weights[normKey] = dist as number;
+				}
+				const edges: [number, number][] = [...edgeSet].map(k => k.split(",").map(Number) as [number, number]);
+				await invoke("set_directed", { directed: false });
+				await invoke("reset_graph");
+				for (const v of ids) await invoke("add_vertex", { v });
+				for (const [u, v] of edges) {
+					const w = weights[`${u},${v}`] ?? 1.0;
+					await invoke("add_edge", { u, v, weight: w });
+				}
+				const snap = await invoke<GraphSnapshot>("get_state");
+				history.current = [];
+				historyIndex.current = -1;
+				saveToHistory(snap);
+				setGraph(snap);
+				const posMap = new Map<number, Pos>();
+				if (Array.isArray(data.positions) && data.positions.length >= ids.length) {
+					ids.forEach((v, i) => posMap.set(v, { x: data.positions[i].x, y: data.positions[i].y }));
+				} else {
+					ids.forEach((v, i) => posMap.set(v, circlePos(i, ids.length, CX, CY, 180)));
+				}
+				setPositions(posMap);
+				clearResult(); setSelectedNode(null); setEdgeSrc(null); setPan({ x: 0, y: 0 });
+				showFlash("ok", `loaded ${ids.length} nodes, ${edges.length} edges`);
+			} catch (e) { showFlash("err", String(e)); }
+		};
+		reader.readAsText(file);
 	};
 
 	const handleNodeClick = (e: React.MouseEvent, v: number) => {
@@ -363,7 +489,8 @@ export default function App() {
 				setEdgeSrc(null);
 				setEFrom(String(u));
 				setETo(String(v));
-				invoke<GraphSnapshot>("add_edge", { u, v })
+				const w = parseFloat(eWeight) || 1.0;
+				invoke<GraphSnapshot>("add_edge", { u, v, weight: w })
 					.then(snap => { if (snap) { saveToHistory(snap); applyGraph(snap); showFlash("ok", `edge (${u}, ${v})`); } })
 					.catch(err => showFlash("err", String(err)));
 			}
@@ -422,6 +549,11 @@ export default function App() {
 		}
 	};
 
+	const handleWeightEdit = async (u: number, v: number, weight: number) => {
+		await invoke("set_weight", { u, v, weight });
+		fetchWeights();
+	};
+
 	const handleCanvasLeftDown = (e: React.MouseEvent<SVGSVGElement>) => {
 		if (e.button !== 0) return;
 		isPanning.current = true;
@@ -430,11 +562,12 @@ export default function App() {
 		setSelectedEdge(null);
 	};
 
-	const showBanner = result?.kind === "traversal" || result?.kind === "closure";
-	const orderLabel = result?.kind === "traversal" ? result.label : result?.kind === "closure" ? result.label : "";
-	const orderItems = result?.kind === "traversal" ? result.order.map((v, i) => ({ v, idx: i + 1 })) : result?.kind === "closure" ? result.vertices.map(v => ({ v })) : [];
+	const showBanner = result?.kind === "traversal" || result?.kind === "closure" || result?.kind === "path";
+	const orderLabel = result?.kind === "traversal" ? result.label : result?.kind === "closure" ? result.label : result?.kind === "path" ? result.label : "";
+	const orderItems = result?.kind === "traversal" ? result.order.map((v, i) => ({ v, idx: i + 1 })) : result?.kind === "closure" ? result.vertices.map(v => ({ v })) : result?.kind === "path" ? result.path.map((v, i) => ({ v, idx: i + 1 })) : [];
 	const connData = result?.kind === "connectivity" ? result.data : null;
 	const colorData = result?.kind === "coloring" ? result.data : null;
+	const pathData = result?.kind === "path" ? result : null;
 
 	return (
 		<div
@@ -454,7 +587,9 @@ export default function App() {
 				vInput={vInput} setVInput={setVInput}
 				eFrom={eFrom} setEFrom={setEFrom}
 				eTo={eTo} setETo={setETo}
+				eWeight={eWeight} setEWeight={setEWeight}
 				algoV={algoV} setAlgoV={setAlgoV}
+				algoTarget={algoTarget} setAlgoTarget={setAlgoTarget}
 				showTemplateMenu={showTemplateMenu}
 				onToggleTemplateMenu={() => setShowTemplateMenu(x => !x)}
 				onAddVertex={handleAddVertex} onRemoveVertex={handleRemoveVertex}
@@ -466,8 +601,12 @@ export default function App() {
 				onClosureIndirect={() => runAlgo("get_transitive_indirect", `TC-(${algoV})`, false)}
 				onConnectivity={() => runAlgo("check_connectivity", "Connectivity")}
 				onColor={handleColoring}
+				onDijkstra={handleDijkstra}
+				onDijkstraPath={handleDijkstraPath}
+				onAStar={handleAStar}
 				onClearResult={clearResult}
 				onLoadTemplate={loadTemplate}
+				onLoadJson={handleLoadJson}
 				canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
 				onToggleHelp={() => setShowHelp(x => !x)}
 				selected={selectedNode}
@@ -477,7 +616,21 @@ export default function App() {
 			/>
 
 			<div className="canvas-area" ref={canvasRef}>
-				{showBanner && <OrderBanner label={orderLabel} items={orderItems} onClose={clearResult} />}
+				{showBanner && pathData ? (
+					<PathPanel
+						label={pathData.label}
+						path={pathData.path}
+						cost={pathData.cost}
+						closed={pathData.closed}
+						onClose={clearResult}
+					/>
+				) : showBanner ? (
+					<OrderBanner
+						label={orderLabel}
+						items={orderItems}
+						onClose={clearResult}
+					/>
+				) : null}
 
 				{edgeSrc !== null && (
 					<div style={{ position: "absolute", top: showBanner ? 33 : 0, left: 0, right: 0, zIndex: 9, background: "#fffbeb", borderBottom: "1px solid #d97706", padding: "2px 10px", fontSize: 10, color: "#92400e", fontFamily: "monospace" }}>
@@ -489,17 +642,20 @@ export default function App() {
 					graph={graph}
 					positions={positions}
 					highlighted={highlighted}
+					highlightedEdges={highlightedEdges}
 					sccMap={sccMap}
 					selected={selectedNode}
 					selectedEdge={selectedEdge}
 					edgeSrc={edgeSrc}
 					pan={pan}
 					scale={scale}
+					weights={weights}
 					svgRef={svgRef}
 					onNodeClick={handleNodeClick}
 					onEdgeClick={handleEdgeClick}
 					onCanvasRightClick={handleCanvasRightClick}
 					onCanvasLeftDown={handleCanvasLeftDown}
+					onWeightEdit={handleWeightEdit}
 				/>
 
 				{graph.vertices.length === 0 && (
@@ -512,6 +668,14 @@ export default function App() {
 				{colorData && <ColorLegend data={colorData} onClose={clearResult} />}
 				{showHelp && <LegendPanel title="Shortcuts" items={HELP_ITEMS} onClose={() => setShowHelp(false)} />}
 			</div>
+
+			<HeuristicEditor
+				open={showHeuristicEditor}
+				vertices={graph.vertices}
+				target={parseInt(algoTarget) || 0}
+				onRunAStar={handleRunAStar}
+				onClose={() => setShowHeuristicEditor(false)}
+			/>
 		</div>
 	);
 }
