@@ -36,6 +36,8 @@ interface ToolbarProps {
 	selectedEdge: EdgeSelection | null;
 	uiZoom: number;
 	setUiZoom: React.Dispatch<React.SetStateAction<number>>;
+	hasAstarResult: boolean;
+	onReport: () => void;
 }
 
 function Sep() { return <div className="tb-sep" />; }
@@ -62,7 +64,7 @@ function TemplateDropdown({ anchorRef, onClose, onSelect }: { anchorRef: React.R
 	);
 }
 
-export default function Toolbar({ graph, flash, hasResult, vInput, setVInput, eFrom, setEFrom, eTo, setETo, eWeight, setEWeight, algoV, setAlgoV, algoTarget, setAlgoTarget, showTemplateMenu, onToggleTemplateMenu, onAddVertex, onRemoveVertex, onAddEdge, onRemoveEdge, onSetDirected, onReset, onBfs, onDfs, onClosureDirect, onClosureIndirect, onConnectivity, onClearResult, onColor, onDijkstra, onDijkstraPath, onAStar, onLoadTemplate, onLoadJson, canUndo, canRedo, onUndo, onRedo, onToggleHelp, selected, selectedEdge, uiZoom, setUiZoom }: ToolbarProps) {
+export default function Toolbar({ graph, flash, hasResult, vInput, setVInput, eFrom, setEFrom, eTo, setETo, eWeight, setEWeight, algoV, setAlgoV, algoTarget, setAlgoTarget, showTemplateMenu, onToggleTemplateMenu, onAddVertex, onRemoveVertex, onAddEdge, onRemoveEdge, onSetDirected, onReset, onBfs, onDfs, onClosureDirect, onClosureIndirect, onConnectivity, onClearResult, onColor, onDijkstra, onDijkstraPath, onAStar, onLoadTemplate, onLoadJson, canUndo, canRedo, onUndo, onRedo, onToggleHelp, selected, selectedEdge, uiZoom, setUiZoom, hasAstarResult, onReport }: ToolbarProps) {
 	const templateBtnRef = useRef<HTMLButtonElement>(null);
 	const jsonInputRef = useRef<HTMLInputElement>(null);
 	const selectionInfo = selected !== null ? `Node ${selected}` : selectedEdge !== null ? `Edge (${selectedEdge.src},${selectedEdge.dst})` : null;
@@ -86,7 +88,7 @@ export default function Toolbar({ graph, flash, hasResult, vInput, setVInput, eF
 			<Sep />
 			<div className="tb-group"><Lbl c="Template" /><button ref={templateBtnRef} className="btn-raised" onClick={onToggleTemplateMenu}>Load ▾</button>{showTemplateMenu && <TemplateDropdown anchorRef={templateBtnRef} onClose={onToggleTemplateMenu} onSelect={onLoadTemplate} />}<button className="btn-raised" onClick={() => jsonInputRef.current?.click()} title="Load JSON file">JSON</button><input ref={jsonInputRef} type="file" accept=".json,application/json" style={{ display: "none" }} onChange={e => { const f = e.target.files?.[0]; if (f) { onLoadJson(f); e.target.value = ""; } }} /></div>
 			<Sep />
-			<div className="tb-group"><Lbl c="Algorithm" /><Field value={algoV} onChange={setAlgoV} placeholder="src" /><Field value={algoTarget} onChange={setAlgoTarget} placeholder="tgt" /><Btn onClick={onBfs} title="Breadth-First Search">BFS</Btn><Btn onClick={onDfs} title="Depth-First Search">DFS</Btn><Btn onClick={onClosureDirect} title="Reachable from">TC+</Btn><Btn onClick={onClosureIndirect} title="Reaches">TC-</Btn><Btn onClick={onDijkstra} cls="primary" title="Dijkstra shortest distances">Dij</Btn><Btn onClick={onDijkstraPath} cls="primary" title="Dijkstra shortest path">→Dij</Btn><Btn onClick={onAStar} cls="primary" title="A* search">A*</Btn><Btn onClick={onConnectivity} cls="primary" title="Connected components">Analyse</Btn><Btn onClick={onColor} cls="primary" title="DSatur graph coloring">Color</Btn>{hasResult && <Btn onClick={onClearResult} cls="danger">✕</Btn>}</div>
+			<div className="tb-group"><Lbl c="Algorithm" /><Field value={algoV} onChange={setAlgoV} placeholder="src" /><Field value={algoTarget} onChange={setAlgoTarget} placeholder="tgt" /><Btn onClick={onBfs} title="Breadth-First Search">BFS</Btn><Btn onClick={onDfs} title="Depth-First Search">DFS</Btn><Btn onClick={onClosureDirect} title="Reachable from">TC+</Btn><Btn onClick={onClosureIndirect} title="Reaches">TC-</Btn><Btn onClick={onDijkstra} cls="primary" title="Dijkstra shortest distances">Dij</Btn><Btn onClick={onDijkstraPath} cls="primary" title="Dijkstra shortest path">→Dij</Btn><Btn onClick={onAStar} cls="primary" title="A* search">A*</Btn>{hasAstarResult && <Btn onClick={onReport} cls="primary" title="Generate congestion comparison report">Report</Btn>}<Btn onClick={onConnectivity} cls="primary" title="Connected components">Analyse</Btn><Btn onClick={onColor} cls="primary" title="DSatur graph coloring">Color</Btn>{hasResult && <Btn onClick={onClearResult} cls="danger">✕</Btn>}</div>
 
 			<span style={{ flex: 1 }} />
 

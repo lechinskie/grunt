@@ -12,6 +12,7 @@ import SccLegend from "./components/SccLegend";
 import ColorLegend from "./components/ColorLegend";
 import LegendPanel from "./components/LegendPanel";
 import HeuristicEditor from "./components/HeuristicEditor";
+import ReportPanel from "./components/ReportPanel";
 
 const MAX_HISTORY = 50;
 
@@ -50,6 +51,10 @@ export default function App() {
 	const [algoTarget, setAlgoTarget] = useState("");
 	const [showTemplateMenu, setShowTemplateMenu] = useState(false);
 	const [showHeuristicEditor, setShowHeuristicEditor] = useState(false);
+
+	const [showReport, setShowReport] = useState(false);
+	const [astarResult, setAstarResult] = useState<DetailedPathResult | null>(null);
+	const [astarParams, setAstarParams] = useState<{ source: number; target: number; heuristic: Record<number, number> } | null>(null);
 
 	const [pan, setPan] = useState({ x: 0, y: 0 });
 	const panRef = useRef(pan);
@@ -333,25 +338,31 @@ export default function App() {
 		setShowHeuristicEditor(true);
 	};
 
-	const handleRunAStar = async (heuristic: Record<number, number>) => {
-		setShowHeuristicEditor(false);
-		const s = parseInt(algoV), t = parseInt(algoTarget);
-		const data = await call<DetailedPathResult | null>("run_a_star", { source: s, target: t, heuristic });
-		if (!data) { showFlash("err", "no path found"); return; }
+	const showPathOnCanvas = (data: DetailedPathResult, label: string) => {
 		const { path, cost, closed } = data;
-		setResult({ kind: "path", label: `A* ${s}→${t}`, path, cost, closed });
+		setResult({ kind: "path", label, path, cost, closed });
 		setHighlighted(new Set(path));
 		const edges = new Set<string>();
 		for (let i = 0; i < path.length - 1; i++) edges.add(`${path[i]},${path[i + 1]}`);
 		setHighlightedEdges(edges);
 	};
 
-	const handleAddVertex = async () => {
-		const v = parseInt(vInput);
-		if (isNaN(v)) { showFlash("err", "invalid vertex id"); return; }
-		await withGraph("add_vertex", { v });
-		setVInput("");
-	};
+	const handleRunAStar = async (heuristic: Record<number, number>) => {
+		setShowHeuristicEditor(false);
+		const s = parseInt(algoV), t = parseInt(algoTarget);
+		const data = await call<DetailedPathResult | null>("run_a_star", { source: s, target: t, heuristic });
+		if (!data) { showFlash("err", "no path found"); return; }
+
+			showPathOnCanvas(data, `A* ${s}→${t}`);
+			setAstarResult(data);
+			setAstarParams({ source: s, target: t, heuristic });
+		};
+			const handleAddVertex = async () => {
+			const v = parseInt(vInput);
+			if (isNaN(v)) { showFlash("err", "invalid vertex id"); return; }
+			await withGraph("add_vertex", { v });
+			setVInput("");
+		};
 
 	const handleRemoveVertex = async () => {
 		const v = parseInt(vInput);
@@ -604,6 +615,8 @@ export default function App() {
 				onDijkstra={handleDijkstra}
 				onDijkstraPath={handleDijkstraPath}
 				onAStar={handleAStar}
+				hasAstarResult={astarResult !== null}
+				onReport={() => setShowReport(true)}
 				onClearResult={clearResult}
 				onLoadTemplate={loadTemplate}
 				onLoadJson={handleLoadJson}
@@ -676,6 +689,17 @@ export default function App() {
 				onRunAStar={handleRunAStar}
 				onClose={() => setShowHeuristicEditor(false)}
 			/>
+		{showReport && astarResult && astarParams && (
+			<ReportPanel
+				source={astarParams.source}
+				target={astarParams.target}
+				heuristic={astarParams.heuristic}
+				normalResult={astarResult}
+				onClose={() => setShowReport(false)}
+				onShowResult={showPathOnCanvas}
+				fetchWeights={fetchWeights}
+			/>
+		)}
 		</div>
 	);
 }

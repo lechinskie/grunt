@@ -283,3 +283,10 @@ html, body {
 
 /* ── Node / edge transitions ──────────────────────────────── */
 circle { transition: fill 0.1s, stroke 0.1s; }
+
+/* shared with other tables in the panel */
+.legend-panel table th, .legend-panel table td {
+  border: 1px solid #ccc;
+  padding: 2px 4px;
+  text-align: center;
+}
